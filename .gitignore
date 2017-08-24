@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+
+# Fritzing for now
+*.fzz
+flexistat*/
