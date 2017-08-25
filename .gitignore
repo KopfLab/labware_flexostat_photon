@@ -30,6 +30,7 @@
 *.exe
 *.out
 *.app
+*.bin
 
 # Fritzing for now
 *.fzz
