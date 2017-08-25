@@ -2,9 +2,42 @@
 #include "math.h"
 
 // web logger
-#include "GsWebhook.h"
-GsWebhook gs ("kopflab_eq");
 const char* webhook = "kopflab_eq";
+char date_time_buffer[20];
+char value_buffer[30];
+char value_sd_buffer[30];
+char ref_buffer[30];
+char ref_sd_buffer[30];
+char json_buffer[255];
+
+// send to google spreadsheet
+bool send_to_gs(const char* type, const char* variable, const char* value, const char* value_sd, const char* ref, const char* ref_sd, const char* unit, const char* msg) {
+  Time.format(Time.now(), "%Y-%m-%d %H:%M:%S").toCharArray(date_time_buffer, sizeof(date_time_buffer));
+  snprintf(json_buffer, sizeof(json_buffer),
+    "{\"datetime\":\"%s\",\"type\":\"%s\",\"var\":\"%s\",\"value\":\"%s\",\"value_sd\":\"%s\",\"ref\":\"%s\",\"ref_sd\":\"%s\", \"units\":\"%s\",\"msg\":\"%s\"}",
+    date_time_buffer, type, variable, value, value_sd, ref, ref_sd, unit, msg);
+  return(Particle.publish(webhook, json_buffer));
+}
+
+// send generic text data
+bool send_to_gs(const char* type, const char* variable, const char* value, const char* unit, const char* msg) {
+  return(send_to_gs(type, variable, value, "", "", "", unit, msg));
+}
+
+// send generic integer data
+bool send_to_gs(const char* type, const char* variable, int value, const char* unit, const char* msg) {
+  sprintf(value_buffer, "%d", value);
+  return(send_to_gs(type, variable, value_buffer, unit, msg));
+}
+
+// send numeric data (allow modification of decimal point?)
+bool send_to_gs(const char* type, const char* variable, double value, double value_sd, double ref, double ref_sd, const char* unit, const char* msg) {
+  sprintf(value_buffer, "%.1f", value);
+  sprintf(ref_buffer, "%.1f", ref);
+  sprintf(value_sd_buffer, "%.1f", value_sd);
+  sprintf(ref_sd_buffer, "%.1f", ref_sd);
+  return(send_to_gs(type, variable, value_buffer, value_sd_buffer, ref_buffer, ref_sd_buffer, unit, msg));
+}
 
 // indicator LED
 const int led = D7;
@@ -57,13 +90,13 @@ void setup() {
     // info
     const int gs_delay = 3000; // allow 3s for message to register
     Serial.println("INFO: Initializing and logging in google spreadsheet.");
-    gs.init();
+    send_to_gs("event", "startup", "", "", "complete");
     delay(gs_delay);
-    gs.send("information", "record interval", RECORD_INTERVAL/(1000*60), "min", "time between OD recordings");
+    send_to_gs("information", "record interval", RECORD_INTERVAL/(1000*60), "min", "time between OD recordings");
     delay(gs_delay);
-    gs.send("information", "read interval", READ_INTERVAL/(1000), "s", "time between OD readings");
+    send_to_gs("information", "read interval", READ_INTERVAL/(1000), "s", "time between OD readings");
     delay(gs_delay);
-    gs.send("information", "averaging number", AVG_N_READINGS, "#", "number of readings averaged per record");
+    send_to_gs("information", "averaging number", AVG_N_READINGS, "#", "number of readings averaged per record");
 
     // start up complete
     Serial.println("INFO: startup complete");
@@ -155,7 +188,7 @@ void loop() {
       Serial.print("RECORDING AVERAGES: ");
       Serial.print("ref = " + String((int) REF_avg) + " +- " + String((int) REF_sdev));
       Serial.print(" / read = " + String((int) OD_avg) + " +- " + String((int) OD_sdev));
-      gs.send("data", "OD", OD_avg, REF_avg, "", "");
+      send_to_gs("data", "OD", OD_avg, OD_sdev, REF_avg, REF_sdev, "", "");
 
       // update timing counter
       last_record = millis();
