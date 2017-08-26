@@ -47,10 +47,10 @@ const int led = D7;
 unsigned long last_sync = millis();
 
 // parameters for checking on flexostat
-const int RECORD_INTERVAL = (5*1000*60); // record every 5 minutes
+const int RECORD_INTERVAL = (1000*30); // record every 30 seconds
 unsigned long last_record = millis();
 
-const int AVG_N_READINGS = 20;
+const int AVG_N_READINGS = 6;
 const int READ_INTERVAL = RECORD_INTERVAL/AVG_N_READINGS;
 unsigned long last_read = millis();
 
