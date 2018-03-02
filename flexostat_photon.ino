@@ -1,5 +1,8 @@
 // math
 #include "math.h"
+#include "Display.h"
+// display
+Display lcd (0x3f, 16, 2, 0); // 20x4 display, don't reserve anything for messages
 
 // web logger
 const char* webhook = "kopflab_eq";
@@ -69,7 +72,16 @@ uint32_t OD_values[AVG_N_READINGS];
 uint32_t REF_values[AVG_N_READINGS];
 int index_counter = 0; // keeping track which index to record in
 bool ready_to_record = FALSE; // make sure at least one full set of readings was taken before calculting the first average
+bool waiting_for_reply = FALSE;
 
+// device name
+char device_name[20];
+void info_handler(const char *topic, const char *data) {
+    Serial.println("Device name: " + String(data));
+    strncpy ( device_name, data, sizeof(device_name) );
+    lcd.print_line(1, device_name);
+    Particle.unsubscribe();
+}
 
 // setup function
 void setup() {
@@ -87,6 +99,11 @@ void setup() {
     pinMode(led, OUTPUT);
     digitalWrite(led, LOW);
 
+    // LCD screen
+    lcd.init();
+    lcd.print_line(1, "Starting up...");
+
+
     // info
     const int gs_delay = 3000; // allow 3s for message to register
     Serial.println("INFO: Initializing and logging in google spreadsheet.");
@@ -98,10 +115,18 @@ void setup() {
     delay(gs_delay);
     send_to_gs("information", "averaging number", AVG_N_READINGS, "#", "number of readings averaged per record");
 
+    // device name
+    Particle.subscribe("spark/", info_handler);
+    Particle.publish("spark/device/name");
+
     // start up complete
     Serial.println("INFO: startup complete");
 }
 
+// OD object
+int byte_num = 0;
+rawOD rod;
+char lcd_buffer[20];
 
 // loop function
 void loop() {
@@ -115,12 +140,17 @@ void loop() {
     }
 
     // check OD
-    if (millis() - last_read > READ_INTERVAL) {
+    if (!waiting_for_reply && millis() - last_read > READ_INTERVAL) {
       Serial.print("INFO: checking OD at ms ");
       Serial.println(millis());
 
-      // OD object
-      rawOD rod;
+      // reset value
+      byte_num = 0;
+      while(byte_num<sizeof(rawOD)) {
+        rod.bytes[byte_num] = 0;
+        byte_num++;
+      }
+      byte_num = 0;
 
       // empty buffer
       while(Serial1.available()) {
@@ -130,24 +160,32 @@ void loop() {
       // issue command
       digitalWrite(led, HIGH);
       last_command = millis();
-      Serial1.print(";"); // send anything
+      Serial1.print("."); // send anything
+      last_read = millis();
+      waiting_for_reply = true;
+    }
 
+    if (waiting_for_reply) {
       //now wait to get bytes for raw OD back
-      int byte_num = 0;
-      while(byte_num<sizeof(rawOD) && (millis()-last_command)<READ_TIMEOUT ) {
-          while(!Serial1.available() && (millis()-last_command)<READ_TIMEOUT);
+      while(Serial1.available()) {
           byte c = Serial1.read();
-          rod.bytes[byte_num] = c;
-          byte_num++;
+          if (c != 255) { // error return seems to be byte 255
+            rod.bytes[byte_num] = c;
+            byte_num++;
+          }
       }
 
       // check for timeout
       if ((millis() - last_command)>READ_TIMEOUT) {
         Serial.print("ERROR: timeout at ");
         Serial.println(millis());
-      } else {
-        Serial.print("VALUE: ref = " + String(rod.values[0]));
-        Serial.println(" / read = " + String(rod.values[1]));
+        waiting_for_reply = false;
+      } else if (byte_num == 2*sizeof(uint32_t)) {
+        sprintf (lcd_buffer, "LAST: %.4f", ((double) rod.values[1])/((double) rod.values[0]));
+        lcd.print_line(1, lcd_buffer);
+        Serial.print("GOT VALUE: ref = " + String(rod.values[0]));
+        Serial.print(" / read = " + String(rod.values[1]));
+        Serial.println(" ratio: " + String(lcd_buffer));
 
         // store values
         OD_values[index_counter] = rod.values[1];
@@ -157,9 +195,9 @@ void loop() {
             // one full set of readings taken
             ready_to_record = true;
         }
+        waiting_for_reply = false;
       }
       digitalWrite(led, LOW);
-      last_read = millis();
     }
 
     // record averaged OD & ref values
@@ -186,8 +224,11 @@ void loop() {
       double REF_sdev = sqrt(REF_ss / ((double) AVG_N_READINGS - 1));
 
       Serial.print("RECORDING AVERAGES: ");
+      sprintf (lcd_buffer, "AVG: %.4f", OD_avg/REF_avg);
+      lcd.print_line(2, lcd_buffer);
       Serial.print("ref = " + String((int) REF_avg) + " +- " + String((int) REF_sdev));
       Serial.print(" / read = " + String((int) OD_avg) + " +- " + String((int) OD_sdev));
+      Serial.println(" ratio: " + String(lcd_buffer));
       send_to_gs("data", "OD", OD_avg, OD_sdev, REF_avg, REF_sdev, "", "");
 
       // update timing counter
